@@ -557,7 +557,7 @@ class Player extends EventEmitter {
       'tdsearch',
       'qbsearch',
       'gaanasearch',
-      'aumsearch',
+      'amzsearch',
       'scsearch'
     ]
     for (const source of sourceCandidates) {
@@ -1444,7 +1444,7 @@ class Player extends EventEmitter {
       ytmusic: 'ytmsearch',
       yt: 'ytmsearch',
       applemusic: 'amsearch',
-      amazonmusic: 'aumsearch',
+      amazonmusic: 'amzsearch',
       pandora: 'pdsearch',
       qobuz: 'qbsearch'
     }
@@ -1459,7 +1459,7 @@ class Player extends EventEmitter {
       'ytmsearch'
     ]
 
-    const mirrorSources = ['amsearch', 'qbsearch', 'pdsearch', 'aumsearch']
+    const mirrorSources = ['amsearch', 'qbsearch', 'pdsearch', 'amzsearch']
 
     const primaryPrefix = sourcePrefixMap[normSource] || 'spsearch'
     const searchPlatforms = [
