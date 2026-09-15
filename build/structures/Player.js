@@ -1408,8 +1408,14 @@ class Player extends EventEmitter {
     const normSource = String(sourceName || '').toLowerCase().trim()
 
     // 1. Native YouTube RD mix if this track is YouTube or has YouTube ID
-    if (normSource.includes('youtube') || normSource.includes('yt')) {
-      if (prevId && /^[a-zA-Z0-9_-]{11}$/.test(prevId)) {
+    const isYt =
+      normSource === 'youtube' ||
+      normSource === 'youtubemusic' ||
+      normSource === 'ytsearch' ||
+      normSource === 'ytmsearch' ||
+      Boolean(prevUri && (prevUri.includes('youtube.com') || prevUri.includes('youtu.be')))
+
+    if (isYt && prevId && /^[a-zA-Z0-9_-]{11}$/.test(prevId)) {
         try {
           const ytMixRes = await this.aqua.resolve({
             query: `https://www.youtube.com/watch?v=${prevId}&list=RD${prevId}`,

@@ -78,6 +78,13 @@ const _functions = {
     v.channelId = player.voiceChannel
     v.resuming = player?._resuming ?? false
     payload.data.volume = player?.volume ?? 100
+    if (player?._deferredStart && player.current?.track) {
+      payload.data.track = { encoded: player.current.track }
+      if (player.current.userData) payload.data.track.userData = player.current.userData
+      payload.data.paused = !!player.paused
+      if (player.position > 0) payload.data.position = player.position
+      player._deferredStart = false
+    }
     return payload
   }
 }
@@ -112,6 +119,9 @@ class PayloadPool {
     const v = payload.data.voice
     v.token = v.endpoint = v.sessionId = null
     payload.data.volume = null
+    delete payload.data.track
+    delete payload.data.paused
+    delete payload.data.position
     this._pool[this._size++] = payload
   }
 
@@ -519,6 +529,11 @@ class Connection {
     this._lastSentVoiceKey = key
 
     this._sendUpdate(pending.payload)
+      .then(() => {
+        if (this._player?._deferredStart) {
+          this._player?._flushDeferredPlay?.()
+        }
+      })
       .catch((error) =>
         reportSuppressedError(this._aqua, 'connection.update.execute', error, {
           guildId: this._guildId
