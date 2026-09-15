@@ -1456,11 +1456,11 @@ class Player extends EventEmitter {
     }
 
     const directSources = [
-      'spsearch',
-      'dzsearch',
       'jssearch',
       'gaanasearch',
       'admsearch',
+      'dzsearch',
+      'spsearch',
       'tdsearch',
       'ytmsearch'
     ]
