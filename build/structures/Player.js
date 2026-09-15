@@ -1382,6 +1382,7 @@ class Player extends EventEmitter {
 
     const currentNormTitle = norm(cleanTitle)
     const prevId = identifier || currentInfo.identifier || currentId
+    const prevUri = uri || currentInfo.uri || this.current?.info?.uri || this.current?.uri || ''
     if (prevId) seen.add(prevId)
     if (currentNormTitle) this.previousTitles.add(currentNormTitle)
 
@@ -1436,7 +1437,6 @@ class Player extends EventEmitter {
           }
         } catch { }
       }
-    }
 
     // 2. Direct sources (native endpoints on Lavalink)
     const sourcePrefixMap = {
