@@ -1349,298 +1349,189 @@ class Player extends EventEmitter {
   }
 
   async _getAutoplayTrack(sourceName, identifier, uri, requester) {
+    if (!this.previousIdentifiers) this.previousIdentifiers = new Set()
+    if (!this.previousTitles) this.previousTitles = new Set()
+
     const seen = new Set(Array.from(this.previousIdentifiers || []))
     const currentId = this.current?.info?.identifier || this.current?.identifier
     if (currentId) seen.add(currentId)
 
-    const normalizedSource = String(sourceName || '').toLowerCase().trim()
+    const norm = (str) =>
+      String(str || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .trim()
 
-    if (normalizedSource === 'youtube' || normalizedSource === 'ytmusic') {
-      const res = await this.aqua.resolve({
-        query: `https://www.youtube.com/watch?v=${identifier}&list=RD${identifier}`,
-        source: 'ytmsearch',
-        requester
-      })
-      if (!_functions.isInvalidLoad(res) && res.tracks?.length) {
-        const candidates = res.tracks.filter(
-          (t) => t.identifier && !seen.has(t.identifier)
-        )
-        return candidates.length
-          ? candidates[_functions.randIdx(candidates.length)]
-          : res.tracks[_functions.randIdx(res.tracks.length)]
-      }
-    } else if (normalizedSource === 'soundcloud') {
-      const scRes = await scAutoPlay(uri, this.nodes?.rest?._autoplayAgent)
-      if (scRes?.length) {
-        let anyValid = null
-        for (const link of scRes) {
-          const res = await this.aqua.resolve({
-            query: link,
-            source: 'scsearch',
-            requester
-          })
-          if (_functions.isInvalidLoad(res) || !res.tracks?.length) continue
-          if (!anyValid)
-            anyValid = res.tracks[_functions.randIdx(res.tracks.length)]
-          const candidates = res.tracks.filter(
-            (t) => t.identifier && !seen.has(t.identifier)
-          )
-          if (candidates.length)
-            return candidates[_functions.randIdx(candidates.length)]
-        }
-        if (anyValid) return anyValid
-      }
-    }
+    const prev = this.previous || this.autoplaySeed
+    const currentInfo = prev?.info || prev || {}
+    const rawTitle = currentInfo.title || this.current?.info?.title || this.current?.title || ''
+    const rawAuthor = currentInfo.author || this.current?.info?.author || this.current?.author || ''
 
-    const currentInfo = this.current?.info || {}
-    const pluginInfo =
-      currentInfo?.pluginInfo && typeof currentInfo.pluginInfo === 'object'
-        ? currentInfo.pluginInfo
-        : this.current?.pluginInfo && typeof this.current.pluginInfo === 'object'
-          ? this.current.pluginInfo
-          : {}
+    const cleanTitle = String(rawTitle || '')
+      .replace(/[\(\[](official\s*(music)?\s*(video|audio|lyric(s)?|visualizer)|lyrics?|visualizer|hd|4k|remaster(ed)?(\s*\d{4})?|hq|live)[\)\]]/gi, '')
+      .replace(/\b(feat\.|ft\.|featuring)\s+[^(\[]+/gi, '')
+      .replace(/[\(\[].*?[\)\]]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
 
-    const asString = (value) => {
-      if (value === undefined || value === null) return ''
-      if (typeof value === 'string' || typeof value === 'number')
-        return String(value).trim()
-      return ''
-    }
-    const firstValue = (...values) => {
-      for (const value of values) {
-        const parsed = asString(value)
-        if (parsed) return parsed
-      }
-      return ''
-    }
-    const firstPluginValue = (keys = []) => {
-      for (const key of keys) {
-        const raw = pluginInfo?.[key]
-        const parsed = firstValue(raw, raw?.id, raw?.identifier, raw?.trackId)
-        if (parsed) return parsed
-      }
-      return ''
-    }
-    const toNumericId = (value) => {
-      const parsed = asString(value)
-      return /^\d+$/.test(parsed) ? parsed : ''
-    }
-    const toIsrc = (value) => {
-      const parsed = asString(value).toUpperCase()
-      return /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(parsed) ? parsed : ''
+    const cleanAuthor = String(rawAuthor || '')
+      .replace(/\b(feat\.|ft\.|featuring)\s+[^(\[]+/gi, '')
+      .replace(/[\(\[].*?[\)\]]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const currentNormTitle = norm(cleanTitle)
+    const prevId = identifier || currentInfo.identifier || currentId
+    if (prevId) seen.add(prevId)
+    if (currentNormTitle) this.previousTitles.add(currentNormTitle)
+
+    const isCandidateValid = (t) => {
+      if (!t) return false
+      const tInfo = t.info || t
+      const tId = tInfo.identifier || t.identifier
+      const tTitle = tInfo.title || t.title || ''
+      const tNorm = norm(tTitle)
+      if (!tTitle || !tNorm) return false
+      if (tId && seen.has(tId)) return false
+      if (this.previousTitles.has(tNorm)) return false
+      if (tNorm === currentNormTitle) return false
+
+      if (this.queue?.toArray?.()?.some((q) => {
+        const qId = q.info?.identifier || q.identifier
+        const qNorm = norm(q.info?.title || q.title)
+        return (tId && qId === tId) || (qNorm && qNorm === tNorm)
+      })) return false
+
+      return true
     }
 
-    const seedIdentifier = firstValue(identifier, currentInfo.identifier)
-    const seedIsrc = toIsrc(
-      firstValue(
-        currentInfo?.isrc,
-        currentInfo?.ISRC,
-        firstPluginValue([
-          'isrc',
-          'ISRC',
-          'internationalStandardRecordingCode'
-        ]),
-        seedIdentifier
-      )
-    )
-    const seedTrackId = toNumericId(
-      firstValue(
-        firstPluginValue([
-          'trackId',
-          'track_id',
-          'id',
-          'songId',
-          'song_id',
-          'deezerId',
-          'deezer_id',
-          'tidalId',
-          'tidal_id',
-          'qobuzId',
-          'qobuz_id'
-        ]),
-        seedIdentifier
-      )
-    )
-    const seedArtistId = toNumericId(
-      firstValue(
-        firstPluginValue([
-          'artistId',
-          'artist_id',
-          'mainArtistId',
-          'main_artist_id'
-        ])
-      )
-    )
-    const seedAlbumId = toNumericId(
-      firstValue(firstPluginValue(['albumId', 'album_id']))
-    )
+    const normSource = String(sourceName || '').toLowerCase().trim()
 
-    const pickCandidate = (tracks = []) => {
-      const candidates = tracks.filter((track) => {
-        const id = track?.info?.identifier || track?.identifier
-        return id ? !seen.has(id) : true
-      })
-      return candidates.length
-        ? candidates[_functions.randIdx(candidates.length)]
-        : null
-    }
-
-    const resolveAttempt = async (queryText, sourceText) => {
-      if (!queryText || !sourceText) return null
-      const res = await this.aqua.resolve({
-        query: queryText,
-        source: sourceText,
-        requester,
-        nodes: this.nodes
-      })
-      if (_functions.isInvalidLoad(res)) return null
-      return pickCandidate(res.tracks || [])
-    }
-
-    const fallbackTitle = this.previous?.info?.title || this.autoplaySeed?.title
-    const fallbackAuthor = this.previous?.info?.author || this.autoplaySeed?.author
-    if (fallbackTitle) {
-      const query = `${fallbackAuthor ? `${fallbackAuthor} - ` : ''}${fallbackTitle}`
-      const searchRes = await this.aqua.resolve({
-        query,
-        source: 'ytmsearch',
-        requester
-      })
-      if (!_functions.isInvalidLoad(searchRes) && searchRes.tracks?.length) {
-        const ytId = searchRes.tracks[0].identifier
-        if (ytId) {
+    // 1. Native YouTube RD mix if this track is YouTube or has YouTube ID
+    if (normSource.includes('youtube') || normSource.includes('yt')) {
+      if (prevId && /^[a-zA-Z0-9_-]{11}$/.test(prevId)) {
+        try {
           const ytMixRes = await this.aqua.resolve({
-            query: `https://www.youtube.com/watch?v=${ytId}&list=RD${ytId}`,
+            query: `https://www.youtube.com/watch?v=${prevId}&list=RD${prevId}`,
             source: 'ytmsearch',
-            requester
+            requester,
+            nodes: this.nodes
           })
           if (!_functions.isInvalidLoad(ytMixRes) && ytMixRes.tracks?.length) {
-            const candidates = ytMixRes.tracks.filter(
-              (t) => t.identifier && !seen.has(t.identifier)
-            )
-            return candidates.length
-              ? candidates[_functions.randIdx(candidates.length)]
-              : ytMixRes.tracks[_functions.randIdx(ytMixRes.tracks.length)]
+            const candidates = ytMixRes.tracks.filter(isCandidateValid)
+            if (candidates.length) {
+              const chosen = candidates[_functions.randIdx(Math.min(candidates.length, 10))]
+              const cid = chosen.identifier || chosen.info?.identifier
+              const ctitle = chosen.info?.title || chosen.title
+              if (cid) { seen.add(cid); this.previousIdentifiers.add(cid); }
+              if (ctitle) this.previousTitles.add(norm(ctitle))
+              return chosen
+            }
           }
-        }
+        } catch { }
       }
     }
 
-    if (normalizedSource === 'spotify') {
-      const isNodelink = !!this.nodes?.isNodelink || !!this.nodes?.info?.isNodelink
-      if (!isNodelink && seedIdentifier) {
-        const spotifyAttempts = [
-          { source: 'sprec', query: seedIdentifier },
-          { source: 'sprec', query: `mix:track:${seedIdentifier}` }
-        ]
-        if (seedArtistId)
-          spotifyAttempts.push({
-            source: 'sprec',
-            query: `mix:artist:${seedArtistId}`
-          })
-        if (seedAlbumId)
-          spotifyAttempts.push({
-            source: 'sprec',
-            query: `mix:album:${seedAlbumId}`
-          })
-        if (seedIsrc)
-          spotifyAttempts.push({
-            source: 'sprec',
-            query: `mix:isrc:${seedIsrc}`
-          })
-
-        for (const attempt of spotifyAttempts) {
-          try {
-            const track = await resolveAttempt(attempt.query, attempt.source)
-            if (track) return track
-          } catch { }
-        }
-      }
-
-      const res = await spAutoPlay(
-        this.autoplaySeed,
-        this,
-        requester,
-        Array.from(this.previousIdentifiers)
-      )
-      if (res?.length) {
-        const candidate = pickCandidate(res)
-        if (candidate) return candidate
-        return res[_functions.randIdx(res.length)]
-      }
+    // 2. Direct sources (native endpoints on Lavalink)
+    const sourcePrefixMap = {
+      spotify: 'spsearch',
+      deezer: 'dzsearch',
+      jiosaavn: 'jssearch',
+      gaana: 'gaanasearch',
+      audiomack: 'admsearch',
+      tidal: 'tdsearch',
+      youtube: 'ytmsearch',
+      ytmusic: 'ytmsearch',
+      yt: 'ytmsearch',
+      applemusic: 'amsearch',
+      amazonmusic: 'aumsearch',
+      pandora: 'pdsearch',
+      qobuz: 'qbsearch'
     }
 
-    const attempts = []
-    const seenAttempts = new Set()
-    const pushAttempt = (queryText, sourceText) => {
-      if (!queryText || !sourceText) return
-      const key = `${sourceText}:${queryText}`
-      if (seenAttempts.has(key)) return
-      seenAttempts.add(key)
-      attempts.push({ query: queryText, source: sourceText })
-    }
-
-    if (normalizedSource.includes('deezer')) {
-      if (seedTrackId) {
-        pushAttempt(seedTrackId, 'dzrec')
-        pushAttempt(`track=${seedTrackId}`, 'dzrec')
-      }
-      if (seedArtistId) pushAttempt(`artist=${seedArtistId}`, 'dzrec')
-      if (seedIsrc) pushAttempt(seedIsrc, 'dzisrc')
-    }
-
-    if (normalizedSource.includes('jiosaavn') && seedIdentifier) {
-      pushAttempt(seedIdentifier, 'jsrec')
-    }
-
-    if (normalizedSource.includes('tidal') && (seedTrackId || seedIdentifier)) {
-      pushAttempt(seedTrackId || seedIdentifier, 'tdrec')
-    }
-
-    if (normalizedSource.includes('qobuz')) {
-      if (seedTrackId) pushAttempt(seedTrackId, 'qbrec')
-      if (seedIsrc) pushAttempt(seedIsrc, 'qbisrc')
-    }
-
-    if (seedIsrc) {
-      pushAttempt(seedIsrc, 'dzisrc')
-      pushAttempt(seedIsrc, 'qbisrc')
-      pushAttempt(`isrc:${seedIsrc}`, 'spsearch')
-    }
-
-    if (seedTrackId) {
-      pushAttempt(seedTrackId, 'dzrec')
-      pushAttempt(`track=${seedTrackId}`, 'dzrec')
-      pushAttempt(seedTrackId, 'tdrec')
-      pushAttempt(seedTrackId, 'qbrec')
-    }
-
-    if (seedArtistId) {
-      pushAttempt(`artist=${seedArtistId}`, 'dzrec')
-    }
-
-    const fallbackQuery = `similar to:${firstValue(currentInfo.title, this.current?.title)} ${firstValue(currentInfo.author, this.current?.author)}`.trim()
-    const fallbackSources = [
-      this.aqua.defaultSearchPlatform,
+    const directSources = [
       'spsearch',
       'dzsearch',
       'jssearch',
-      'amsearch',
-      'tdsearch',
-      'qbsearch',
       'gaanasearch',
-      'aumsearch',
-      'scsearch'
+      'admsearch',
+      'tdsearch',
+      'ytmsearch'
     ]
-    for (const source of fallbackSources) {
-      if (!source) continue
-      pushAttempt(fallbackQuery, source)
+
+    const mirrorSources = ['amsearch', 'qbsearch', 'pdsearch', 'aumsearch']
+
+    const primaryPrefix = sourcePrefixMap[normSource] || 'spsearch'
+    const searchPlatforms = [
+      primaryPrefix,
+      ...directSources.filter((s) => s !== primaryPrefix),
+      ...mirrorSources
+    ]
+
+    const searchTerms = []
+    if (cleanAuthor && cleanTitle) {
+      searchTerms.push(cleanAuthor)
+      searchTerms.push(`${cleanAuthor} ${cleanTitle}`)
+    } else if (cleanAuthor) {
+      searchTerms.push(cleanAuthor)
+    } else if (cleanTitle) {
+      searchTerms.push(cleanTitle)
     }
 
-    for (const attempt of attempts) {
+    for (const platform of searchPlatforms) {
+      for (const term of searchTerms) {
+        if (!term || !term.trim()) continue
+        try {
+          const res = await this.aqua.resolve({
+            query: `${platform}:${term.trim()}`,
+            source: platform,
+            requester,
+            nodes: this.nodes
+          })
+          if (!_functions.isInvalidLoad(res) && res.tracks?.length) {
+            const candidates = res.tracks.filter(isCandidateValid)
+            if (candidates.length) {
+              const chosen = candidates[_functions.randIdx(Math.min(candidates.length, 5))]
+              const cid = chosen.identifier || chosen.info?.identifier
+              const ctitle = chosen.info?.title || chosen.title
+              if (cid) { seen.add(cid); this.previousIdentifiers.add(cid); }
+              if (ctitle) this.previousTitles.add(norm(ctitle))
+              return chosen
+            }
+          }
+        } catch { }
+      }
+    }
+
+    // 3. Last fallback: Resolve YouTube RD mix by searching for YouTube ID
+    if (cleanTitle && cleanAuthor) {
       try {
-        const track = await resolveAttempt(attempt.query, attempt.source)
-        if (track) return track
+        const ytSearch = await this.aqua.resolve({
+          query: `ytmsearch:${cleanAuthor} ${cleanTitle}`,
+          source: 'ytmsearch',
+          requester,
+          nodes: this.nodes
+        })
+        const ytId = ytSearch?.tracks?.[0]?.identifier || ytSearch?.tracks?.[0]?.info?.identifier
+        if (ytId && /^[a-zA-Z0-9_-]{11}$/.test(ytId)) {
+          const ytMixRes = await this.aqua.resolve({
+            query: `https://www.youtube.com/watch?v=${ytId}&list=RD${ytId}`,
+            source: 'ytmsearch',
+            requester,
+            nodes: this.nodes
+          })
+          if (!_functions.isInvalidLoad(ytMixRes) && ytMixRes.tracks?.length) {
+            const candidates = ytMixRes.tracks.filter(isCandidateValid)
+            if (candidates.length) {
+              const chosen = candidates[_functions.randIdx(Math.min(candidates.length, 10))]
+              const cid = chosen.identifier || chosen.info?.identifier
+              const ctitle = chosen.info?.title || chosen.title
+              if (cid) { seen.add(cid); this.previousIdentifiers.add(cid); }
+              if (ctitle) this.previousTitles.add(norm(ctitle))
+              return chosen
+            }
+          }
+        }
       } catch { }
     }
 

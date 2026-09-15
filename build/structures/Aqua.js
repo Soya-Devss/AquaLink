@@ -101,11 +101,10 @@ const _functions = {
     }),
   noop: () => { },
   isUrl: (query) => {
-    if (typeof query !== 'string' || query.length <= 8) return false
+    if (typeof query !== 'string' || query.length < 4) return false
     const q = query.trimStart()
-    return (
-      q.startsWith('http://') || q.startsWith('https://') || q.includes(':')
-    )
+    if (q.startsWith('http://') || q.startsWith('https://')) return true
+    return /^(?:[a-z0-9_-]+search|[a-z0-9_-]+rec|dzisrc|qbisrc|spotify|audiomack|deezer|jiosaavn|tidal|qobuz|applemusic):/i.test(q)
   },
   formatQuery(query, source) {
     return _functions.isUrl(query) ? query : `${source}${SEARCH_PREFIX}${query}`
