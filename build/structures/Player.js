@@ -1406,120 +1406,129 @@ class Player extends EventEmitter {
       return true
     }
 
+    const markAndReturn = (chosen) => {
+      const cid = chosen.identifier || chosen.info?.identifier
+      const ctitle = chosen.info?.title || chosen.title
+      if (cid) { seen.add(cid); this.previousIdentifiers.add(cid) }
+      if (ctitle) this.previousTitles.add(norm(ctitle))
+      return chosen
+    }
+
     const normSource = String(sourceName || '').toLowerCase().trim()
 
-    // 1. Primary Recommendation Engine: YouTube Mix (list=RD<id>)
-    // YouTube Mix returns 25 dynamically generated, algorithmic recommendations
-    let ytId = isYt && prevId && /^[a-zA-Z0-9_-]{11}$/.test(prevId) ? prevId : null
+    // Whether the seed track is genuinely from YouTube / YT Music
+    const isYt =
+      normSource === 'youtube' ||
+      normSource === 'youtubemusic' ||
+      normSource === 'ytmusic' ||
+      normSource === 'ytsearch' ||
+      normSource === 'ytmsearch' ||
+      Boolean(prevUri && (prevUri.includes('youtube.com') || prevUri.includes('youtu.be')))
 
-    if (!ytId && (cleanTitle || cleanAuthor)) {
-      try {
-        const queryText = cleanAuthor && cleanTitle ? (cleanAuthor + " " + cleanTitle) : (cleanTitle || cleanAuthor)
-        const ytSearch = await this.aqua.resolve({
-          query: "ytmsearch:" + queryText,
-          source: "ytmsearch",
-          requester,
-          nodes: this.nodes
-        })
-        const found = ytSearch?.tracks?.[0]?.identifier || ytSearch?.tracks?.[0]?.info?.identifier
-        if (found && /^[a-zA-Z0-9_-]{11}$/.test(found)) {
-          ytId = found
-        }
-      } catch { }
-    }
+    // ─── 1. YouTube / YT Music — YouTube Mix ───────────────────────────────
+    if (isYt) {
+      let ytId = prevId && /^[a-zA-Z0-9_-]{11}$/.test(prevId) ? prevId : null
 
-    if (ytId) {
-      try {
-        const ytMixRes = await this.aqua.resolve({
-          query: "https://www.youtube.com/watch?v=" + ytId + "&list=RD" + ytId,
-          source: "ytmsearch",
-          requester,
-          nodes: this.nodes
-        })
-        if (!_functions.isInvalidLoad(ytMixRes) && ytMixRes.tracks?.length) {
-          const candidates = ytMixRes.tracks.filter(isCandidateValid)
-          if (candidates.length) {
-            const chosen = candidates[_functions.randIdx(Math.min(candidates.length, 10))]
-            const cid = chosen.identifier || chosen.info?.identifier
-            const ctitle = chosen.info?.title || chosen.title
-            if (cid) { seen.add(cid); this.previousIdentifiers.add(cid); }
-            if (ctitle) this.previousTitles.add(norm(ctitle))
-            return chosen
+      if (!ytId && (cleanTitle || cleanAuthor)) {
+        try {
+          const queryText = cleanAuthor && cleanTitle ? (cleanAuthor + ' ' + cleanTitle) : (cleanTitle || cleanAuthor)
+          const ytSearch = await this.aqua.resolve({
+            query: 'ytmsearch:' + queryText,
+            source: 'ytmsearch',
+            requester,
+            nodes: this.nodes
+          })
+          const found = ytSearch?.tracks?.[0]?.identifier || ytSearch?.tracks?.[0]?.info?.identifier
+          if (found && /^[a-zA-Z0-9_-]{11}$/.test(found)) ytId = found
+        } catch { }
+      }
+
+      if (ytId) {
+        try {
+          const ytMixRes = await this.aqua.resolve({
+            query: 'https://www.youtube.com/watch?v=' + ytId + '&list=RD' + ytId,
+            source: 'ytmsearch',
+            requester,
+            nodes: this.nodes
+          })
+          if (!_functions.isInvalidLoad(ytMixRes) && ytMixRes.tracks?.length) {
+            const candidates = ytMixRes.tracks.filter(isCandidateValid)
+            if (candidates.length) {
+              return markAndReturn(candidates[_functions.randIdx(Math.min(candidates.length, 10))])
+            }
           }
-        }
-      } catch { }
-    }
+        } catch { }
+      }
 
-    // 2. Fallback: Search platforms if YouTube Mix returned empty
-    const sourcePrefixMap = {
-      spotify: "spsearch",
-      deezer: "dzsearch",
-      jiosaavn: "jssearch",
-      gaana: "gaanasearch",
-      audiomack: "admsearch",
-      tidal: "tdsearch",
-      youtube: "ytmsearch",
-      ytmusic: "ytmsearch",
-      yt: "ytmsearch",
-      applemusic: "amsearch",
-      amazonmusic: "amzsearch",
-      pandora: "pdsearch",
-      qobuz: "qbsearch"
-    }
+      // YT fallback: search with artist rotation
+      const artists = cleanAuthor.split(/\s*[,&\/|+×]\s*|\s+and\s+/i).map(a => a.trim()).filter(Boolean)
+      const ytQueries = []
+      if (artists[0] && cleanTitle) ytQueries.push(artists[0] + ' ' + cleanTitle)
+      if (artists[0]) ytQueries.push(artists[0])
+      if (artists[1]) ytQueries.push(artists[1])
+      if (cleanTitle && !artists[0]) ytQueries.push(cleanTitle)
 
-    const directSources = [
-      "spsearch",
-      "jssearch",
-      "gaanasearch",
-      "admsearch",
-      "dzsearch",
-      "tdsearch",
-      "ytmsearch"
-    ]
-
-    const mirrorSources = ["amsearch", "qbsearch", "pdsearch", "amzsearch"]
-    const primaryPrefix = sourcePrefixMap[normSource] || (this.aqua.defaultSearchPlatform || "spsearch")
-    const searchPlatforms = [
-      primaryPrefix,
-      ...directSources.filter((s) => s !== primaryPrefix),
-      ...mirrorSources
-    ]
-
-    const searchTerms = []
-    if (cleanAuthor && cleanTitle) {
-      searchTerms.push(cleanAuthor + " " + cleanTitle)
-      searchTerms.push(cleanAuthor)
-    } else if (cleanTitle) {
-      searchTerms.push(cleanTitle)
-    } else if (cleanAuthor) {
-      searchTerms.push(cleanAuthor)
-    }
-
-    for (const platform of searchPlatforms) {
-      for (const term of searchTerms) {
+      for (const q of ytQueries) {
         try {
           const res = await this.aqua.resolve({
-            query: platform + ":" + term,
-            source: platform,
+            query: 'ytmsearch:' + q,
+            source: 'ytmsearch',
             requester,
             nodes: this.nodes
           })
           if (!_functions.isInvalidLoad(res) && res.tracks?.length) {
             const candidates = res.tracks.filter(isCandidateValid)
             if (candidates.length) {
-              const chosen = candidates[_functions.randIdx(Math.min(candidates.length, 5))]
-              const cid = chosen.identifier || chosen.info?.identifier
-              const ctitle = chosen.info?.title || chosen.title
-              if (cid) { seen.add(cid); this.previousIdentifiers.add(cid); }
-              if (ctitle) this.previousTitles.add(norm(ctitle))
-              return chosen
+              return markAndReturn(candidates[_functions.randIdx(Math.min(candidates.length, 15))])
             }
           }
         } catch { }
       }
+      return null
+    }
+
+    // ─── 2. All non-YouTube sources ────────────────────────────────────────
+    // Stay strictly on the native source prefix. NEVER cross to YouTube.
+    const sourcePrefixMap = {
+      spotify:     'spsearch',
+      deezer:      'dzsearch',
+      jiosaavn:    'jssearch',
+      gaana:       'gaanasearch',
+      audiomack:   'admsearch',
+      tidal:       'tdsearch',
+      applemusic:  'amsearch',
+      amazonmusic: 'amzsearch'
+    }
+    const nativePrefix = sourcePrefixMap[normSource] || (this.aqua.defaultSearchPlatform || 'spsearch')
+
+    // Build search queries with artist rotation to prevent repetition
+    const artists = cleanAuthor.split(/\s*[,&\/|+×]\s*|\s+and\s+/i).map(a => a.trim()).filter(Boolean)
+    const searchQueries = []
+    if (artists[0] && cleanTitle) searchQueries.push(artists[0] + ' ' + cleanTitle)
+    if (artists[0]) searchQueries.push(artists[0])
+    if (artists[1]) searchQueries.push(artists[1])
+    if (cleanTitle && !artists[0]) searchQueries.push(cleanTitle)
+
+    for (const q of searchQueries) {
+      try {
+        const res = await this.aqua.resolve({
+          query: nativePrefix + ':' + q,
+          source: nativePrefix,
+          requester,
+          nodes: this.nodes
+        })
+        if (!_functions.isInvalidLoad(res) && res.tracks?.length) {
+          const candidates = res.tracks.filter(isCandidateValid)
+          if (candidates.length) {
+            return markAndReturn(candidates[_functions.randIdx(Math.min(candidates.length, 20))])
+          }
+        }
+      } catch { }
     }
     return null
   }
+
+
 
   trackStart(_player, _track, payload = {}) {
     if (this.destroyed) return
